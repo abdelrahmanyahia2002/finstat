@@ -10,6 +10,9 @@ between the screen, the PDF and the workbook.
 
 **Next.js · NestJS · PostgreSQL · Prisma · Redis · BullMQ · ExcelJS · pdfmake · TypeScript throughout**
 
+**[Project page →](https://abdelrahmanyahia2002.github.io/finstat/)** — the walkthrough,
+the screenshots, and how the numbers actually tie.
+
 ---
 
 ## Demo
