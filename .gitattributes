@@ -1,0 +1,10 @@
+# Normalise line endings in the repository, so a Windows checkout does not turn
+# every file into a diff for somebody on macOS or Linux.
+* text=auto eol=lf
+
+# Binary demo assets must never be line-ending converted.
+*.png binary
+*.gif binary
+*.mp4 binary
+*.xlsx binary
+*.pdf binary

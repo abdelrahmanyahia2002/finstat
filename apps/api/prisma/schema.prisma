@@ -1,0 +1,440 @@
+// FinStat data model.
+//
+// One company has many financial years. A financial year owns a trial balance,
+// a debtors and creditors listing, and its notes. Every statement in the app is
+// derived from those, never stored, so a figure can only ever be wrong in one
+// place.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// People and access
+// ---------------------------------------------------------------------------
+
+enum GlobalRole {
+  SUPERADMIN
+  USER
+}
+
+enum CompanyRole {
+  OWNER
+  ADMIN
+  PREPARER
+  REVIEWER
+  VIEWER
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  globalRole   GlobalRole @default(USER)
+  isActive     Boolean    @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  memberships   CompanyUser[]
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  jobs          JobRecord[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model CompanyUser {
+  id        String      @id @default(uuid())
+  companyId String
+  userId    String
+  role      CompanyRole @default(VIEWER)
+  createdAt DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Company and financial year
+// ---------------------------------------------------------------------------
+
+enum ReportingFramework {
+  IFRS
+  IFRS_FOR_SMES
+  LOCAL_GAAP
+  OTHER
+}
+
+model Company {
+  id                 String             @id @default(uuid())
+  name               String
+  registrationNumber String?
+  taxNumber          String?
+  currencyCode       String             @default("USD")
+  currencySymbol     String             @default("$")
+  locale             String             @default("en-US")
+  country            String?
+  addressLine1       String?
+  addressLine2       String?
+  city               String?
+  postalCode         String?
+  reportingFramework ReportingFramework @default(IFRS_FOR_SMES)
+  preparedBy         String?
+  approvedBy         String?
+  reportFooter       String?
+  logoUrl            String?
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  members        CompanyUser[]
+  financialYears FinancialYear[]
+  accounts       Account[]
+  parties        Party[]
+  settings       Setting[]
+  auditLogs      AuditLog[]
+  jobs           JobRecord[]
+
+  @@index([name])
+}
+
+enum FinancialYearStatus {
+  DRAFT
+  OPEN
+  REVIEW
+  LOCKED
+  CLOSED
+}
+
+model FinancialYear {
+  id             String              @id @default(uuid())
+  companyId      String
+  label          String
+  startDate      DateTime            @db.Date
+  endDate        DateTime            @db.Date
+  status         FinancialYearStatus @default(DRAFT)
+  isCurrent      Boolean             @default(false)
+  previousYearId String?             @unique
+  closedAt       DateTime?
+  notesIntro     String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  company      Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  previousYear FinancialYear? @relation("YearChain", fields: [previousYearId], references: [id], onDelete: SetNull)
+  nextYear     FinancialYear? @relation("YearChain")
+
+  balances       TrialBalanceEntry[]
+  adjustments    Adjustment[]
+  partyBalances  PartyBalance[]
+  notes          Note[]
+  jobs           JobRecord[]
+
+  @@unique([companyId, label])
+  @@index([companyId, startDate])
+}
+
+// ---------------------------------------------------------------------------
+// Chart of accounts and balances
+// ---------------------------------------------------------------------------
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+model Account {
+  id          String      @id @default(uuid())
+  companyId   String
+  code        String
+  name        String
+  type        AccountType
+  // Reporting category, one of the StatementSection values in @finstat/shared.
+  // Kept as text so the taxonomy can grow without a migration on every addition.
+  section     String?
+  description String?
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  company         Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  balances        TrialBalanceEntry[]
+  adjustmentLines AdjustmentLine[]
+  noteLines       NoteLine[]
+
+  @@unique([companyId, code])
+  @@index([companyId, section])
+}
+
+enum BalanceSource {
+  MANUAL
+  IMPORT
+  PASTE
+  CARRY_FORWARD
+  ADJUSTMENT
+}
+
+model TrialBalanceEntry {
+  id              String        @id @default(uuid())
+  financialYearId String
+  accountId       String
+  debit           Decimal       @default(0) @db.Decimal(18, 2)
+  credit          Decimal       @default(0) @db.Decimal(18, 2)
+  source          BalanceSource @default(MANUAL)
+  note            String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  financialYear FinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Cascade)
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([financialYearId, accountId])
+  @@index([financialYearId])
+}
+
+// Journal adjustments sit alongside the trial balance rather than overwriting
+// it, so the original imported figures stay visible next to what was changed.
+
+enum AdjustmentStatus {
+  DRAFT
+  POSTED
+  REVERSED
+}
+
+model Adjustment {
+  id              String           @id @default(uuid())
+  financialYearId String
+  reference       String
+  description     String
+  date            DateTime         @db.Date
+  status          AdjustmentStatus @default(DRAFT)
+  createdById     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  financialYear FinancialYear    @relation(fields: [financialYearId], references: [id], onDelete: Cascade)
+  lines         AdjustmentLine[]
+
+  @@index([financialYearId])
+}
+
+model AdjustmentLine {
+  id           String  @id @default(uuid())
+  adjustmentId String
+  accountId    String
+  debit        Decimal @default(0) @db.Decimal(18, 2)
+  credit       Decimal @default(0) @db.Decimal(18, 2)
+  description  String?
+
+  adjustment Adjustment @relation(fields: [adjustmentId], references: [id], onDelete: Cascade)
+  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([adjustmentId])
+}
+
+// ---------------------------------------------------------------------------
+// Debtors and creditors
+// ---------------------------------------------------------------------------
+
+enum PartyType {
+  DEBTOR
+  CREDITOR
+}
+
+model Party {
+  id           String    @id @default(uuid())
+  companyId    String
+  type         PartyType
+  code         String
+  name         String
+  contactName  String?
+  email        String?
+  phone        String?
+  vatNumber    String?
+  creditLimit  Decimal?  @db.Decimal(18, 2)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  balances PartyBalance[]
+
+  @@unique([companyId, type, code])
+  @@index([companyId, type])
+}
+
+model PartyBalance {
+  id              String   @id @default(uuid())
+  financialYearId String
+  partyId         String
+  current         Decimal  @default(0) @db.Decimal(18, 2)
+  days30          Decimal  @default(0) @db.Decimal(18, 2)
+  days60          Decimal  @default(0) @db.Decimal(18, 2)
+  days90          Decimal  @default(0) @db.Decimal(18, 2)
+  days120Plus     Decimal  @default(0) @db.Decimal(18, 2)
+  // The balance as stated on the listing. Validation compares it against the
+  // ageing buckets and against the control account in the trial balance.
+  total           Decimal  @default(0) @db.Decimal(18, 2)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  financialYear FinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Cascade)
+  party         Party         @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([financialYearId, partyId])
+  @@index([financialYearId])
+}
+
+// ---------------------------------------------------------------------------
+// Notes and disclosures
+// ---------------------------------------------------------------------------
+
+enum NoteKind {
+  POLICY
+  SECTION
+  FREE_TEXT
+}
+
+model Note {
+  id                String   @id @default(uuid())
+  financialYearId   String
+  number            Int
+  title             String
+  kind              NoteKind @default(SECTION)
+  // The statement section this note supports, when it supports one.
+  section           String?
+  body              String?
+  isSystemGenerated Boolean  @default(false)
+  sortOrder         Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  financialYear FinancialYear @relation(fields: [financialYearId], references: [id], onDelete: Cascade)
+  lines         NoteLine[]
+
+  @@unique([financialYearId, number])
+  @@index([financialYearId])
+}
+
+model NoteLine {
+  id            String   @id @default(uuid())
+  noteId        String
+  label         String
+  currentAmount Decimal? @db.Decimal(18, 2)
+  priorAmount   Decimal? @db.Decimal(18, 2)
+  isSubtotal    Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  accountId     String?
+
+  note    Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([noteId])
+}
+
+// ---------------------------------------------------------------------------
+// Background work, imports and reports
+// ---------------------------------------------------------------------------
+
+enum JobType {
+  EXCEL_IMPORT
+  EXCEL_EXPORT
+  PDF_REPORT
+  YEAR_CARRY_FORWARD
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model JobRecord {
+  id              String    @id @default(uuid())
+  companyId       String
+  financialYearId String?
+  type            JobType
+  status          JobStatus @default(QUEUED)
+  progress        Int       @default(0)
+  message         String?
+  error           String?
+  params          Json?
+  fileName        String?
+  filePath        String?
+  createdById     String?
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  financialYear FinancialYear? @relation(fields: [financialYearId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Settings and audit
+// ---------------------------------------------------------------------------
+
+model Setting {
+  id        String   @id @default(uuid())
+  companyId String?
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  companyId String?
+  userId    String?
+  action    String
+  entity    String
+  entityId  String?
+  summary   String
+  before    Json?
+  after     Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([entity, entityId])
+}

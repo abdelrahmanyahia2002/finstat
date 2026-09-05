@@ -1,0 +1,17 @@
+node_modules/
+dist/
+dist-test/
+build/
+.next/
+coverage/
+*.log
+.env
+.env.local
+.DS_Store
+storage/
+apps/api/storage/
+*.tsbuildinfo
+
+# Demo recording working files
+.demo-frames/
+.demo-check/

@@ -1,0 +1,34 @@
+{
+  "name": "finstat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Web based financial statement preparation: trial balance in, balance sheet, profit and loss, cash flow and notes out.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:shared": "npm run build -w @finstat/shared",
+    "dev:api": "npm run start:dev -w @finstat/api",
+    "dev:web": "npm run dev -w @finstat/web",
+    "build": "npm run build:shared && npm run build -w @finstat/api && npm run build -w @finstat/web",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "npm run prisma:deploy -w @finstat/api",
+    "db:seed": "npm run prisma:seed -w @finstat/api",
+    "db:studio": "npm run prisma:studio -w @finstat/api",
+    "test": "npm run test -w @finstat/shared",
+    "setup": "npm install && npm run setup:env && npm run build:shared && npm run db:up && node scripts/wait-for-db.mjs && npm run db:migrate && npm run db:seed",
+    "setup:env": "node scripts/setup-env.mjs",
+    "db:migrate:dev": "npm run prisma:migrate -w @finstat/api",
+    "test:smoke": "node apps/api/scripts/smoke.mjs",
+    "typecheck": "npm run build:shared && tsc -p apps/api/tsconfig.json --noEmit && npm run typecheck -w @finstat/web",
+    "demo": "node scripts/record-demo.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.10.0"
+  }
+}
