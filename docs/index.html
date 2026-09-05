@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FinStat — financial statement preparation</title>
+<meta name="description" content="Capture a trial balance; the balance sheet, profit and loss, cash flow statement and notes are derived from it. Next.js, NestJS, PostgreSQL, Prisma, Redis.">
+
+<meta property="og:title" content="FinStat — financial statement preparation">
+<meta property="og:description" content="Trial balance in. Balance sheet, profit and loss, cash flow and notes out. Every figure traced to one account on one chart.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="screenshot-balance-sheet.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --ink-900: #0f1523;
+    --ink-850: #151d31;
+    --ink-800: #1f2a44;
+    --ink-700: #2d3d53;
+    --ink-600: #3d5069;
+    --ink-400: #7387a3;
+    --ink-300: #a3b2c7;
+    --ink-200: #cbd5e3;
+    --ink-100: #e7ecf3;
+    --ink-50:  #f5f7fa;
+    --accent:  #4bbf90;
+    --accent-deep: #2f8464;
+    --amber:   #e0a944;
+    --red:     #e2686b;
+
+    --sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+    --mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+    --measure: 1180px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--ink-900);
+    color: var(--ink-100);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { width: 100%; max-width: var(--measure); margin: 0 auto; padding: 0 24px; }
+
+  a { color: inherit; }
+
+  .tabular { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+
+  /* ---- Hero ---------------------------------------------------------- */
+
+  header.hero {
+    position: relative;
+    padding: 84px 0 64px;
+    overflow: hidden;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+  }
+
+  /* A faint ledger rule behind the hero, echoing a sheet of accounting paper. */
+  header.hero::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(255,255,255,0.035) 0px,
+      rgba(255,255,255,0.035) 1px,
+      transparent 1px,
+      transparent 34px
+    );
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 40%, transparent 100%);
+    pointer-events: none;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin-bottom: 34px;
+    position: relative;
+  }
+  .brand .mark {
+    width: 32px; height: 32px;
+    display: grid; place-items: center;
+    border-radius: 8px;
+    background: var(--ink-100);
+    color: var(--ink-900);
+    font-weight: 700;
+    font-size: 15px;
+  }
+
+  h1 {
+    position: relative;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(2.6rem, 6.2vw, 4.6rem);
+    line-height: 1.04;
+    letter-spacing: -0.015em;
+    margin: 0 0 22px;
+    max-width: 17ch;
+  }
+  h1 em { font-style: italic; color: var(--accent); }
+
+  .lede {
+    position: relative;
+    font-size: clamp(1.02rem, 1.6vw, 1.22rem);
+    color: var(--ink-300);
+    max-width: 62ch;
+    margin: 0 0 30px;
+  }
+
+  .stack {
+    position: relative;
+    display: flex; flex-wrap: wrap; gap: 7px;
+    margin-bottom: 34px;
+  }
+  .chip {
+    font-size: 12.5px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.13);
+    color: var(--ink-300);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .actions { position: relative; display: flex; flex-wrap: wrap; gap: 11px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 11px 20px;
+    border-radius: 8px;
+    font-size: 14.5px;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--ink-100); color: var(--ink-900); }
+  .btn-primary:hover { background: #fff; }
+  .btn-ghost { border-color: rgba(255,255,255,0.17); color: var(--ink-100); }
+  .btn-ghost:hover { border-color: rgba(255,255,255,0.34); background: rgba(255,255,255,0.04); }
+
+  /* ---- Loop ---------------------------------------------------------- */
+
+  .loop {
+    position: relative;
+    margin-top: 54px;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.11);
+    box-shadow: 0 30px 70px -24px rgba(0,0,0,0.72);
+    background: var(--ink-850);
+  }
+  .loop img { display: block; width: 100%; height: auto; }
+  .loop figcaption {
+    padding: 13px 18px;
+    font-size: 13.5px;
+    color: var(--ink-400);
+    border-top: 1px solid rgba(255,255,255,0.07);
+  }
+
+  /* ---- Sections ------------------------------------------------------ */
+
+  section { padding: 74px 0; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  section.paper {
+    background: var(--ink-50);
+    color: var(--ink-800);
+    border-bottom-color: var(--ink-200);
+  }
+
+  .eyebrow {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.13em;
+    font-weight: 700;
+    color: var(--accent);
+    margin: 0 0 12px;
+  }
+  .paper .eyebrow { color: var(--accent-deep); }
+
+  h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: clamp(1.85rem, 3.4vw, 2.7rem);
+    line-height: 1.12;
+    letter-spacing: -0.01em;
+    margin: 0 0 16px;
+    max-width: 22ch;
+  }
+
+  .section-lede { color: var(--ink-400); max-width: 66ch; margin: 0 0 40px; font-size: 1.02rem; }
+  .paper .section-lede { color: var(--ink-600); }
+
+  /* ---- The proof ----------------------------------------------------- */
+
+  .proof { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); }
+
+  .card {
+    padding: 26px;
+    border-radius: 11px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.012));
+  }
+  .card h3 {
+    font-size: 16px; margin: 0 0 9px; font-weight: 650; letter-spacing: -0.005em;
+  }
+  .card p { margin: 0; color: var(--ink-400); font-size: 14.6px; }
+  .card p + p { margin-top: 11px; }
+
+  pre.algebra {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.85;
+    color: var(--ink-200);
+    background: rgba(0,0,0,0.34);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px;
+    padding: 18px 20px;
+    margin: 18px 0 0;
+    overflow-x: auto;
+  }
+  pre.algebra .hl { color: var(--accent); }
+
+  /* ---- Numbers ------------------------------------------------------- */
+
+  .figures {
+    display: grid; gap: 1px;
+    grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+    background: rgba(255,255,255,0.09);
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 11px;
+    overflow: hidden;
+    margin-top: 42px;
+  }
+  .figure { background: var(--ink-900); padding: 24px 22px; }
+  .figure .n {
+    font-family: var(--serif);
+    font-size: 2.5rem;
+    line-height: 1;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 7px;
+  }
+  .figure .l { font-size: 13.4px; color: var(--ink-400); }
+
+  /* ---- Video --------------------------------------------------------- */
+
+  .video-frame {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--ink-200);
+    box-shadow: 0 26px 60px -28px rgba(15,21,35,0.45);
+    background: #000;
+  }
+  .video-frame video { display: block; width: 100%; height: auto; }
+
+  /* ---- Features ------------------------------------------------------ */
+
+  .features { display: grid; gap: 26px 34px; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); }
+  .feature h3 {
+    font-size: 15.4px; margin: 0 0 7px; font-weight: 650;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .feature h3::before {
+    content: '';
+    width: 15px; height: 2px; flex: none;
+    background: var(--accent-deep);
+  }
+  .feature p { margin: 0; font-size: 14.4px; color: var(--ink-600); }
+
+  /* ---- Shots --------------------------------------------------------- */
+
+  .shots { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .shot {
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--ink-200);
+    background: #fff;
+    box-shadow: 0 14px 34px -22px rgba(15,21,35,0.4);
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot .cap {
+    padding: 11px 15px; font-size: 13px; color: var(--ink-600);
+    border-top: 1px solid var(--ink-100);
+  }
+
+  /* ---- Validation list ----------------------------------------------- */
+
+  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 1px; background: var(--ink-200); border: 1px solid var(--ink-200); border-radius: 10px; overflow: hidden; }
+  .checks li {
+    background: #fff; padding: 12px 17px;
+    display: flex; align-items: baseline; gap: 13px;
+    font-size: 14.4px;
+  }
+  .checks .sev {
+    font-size: 10.6px; text-transform: uppercase; letter-spacing: 0.09em;
+    font-weight: 700; flex: none; width: 62px;
+  }
+  .sev.err { color: var(--red); }
+  .sev.warn { color: #b26b00; }
+  .sev.info { color: var(--ink-400); }
+
+  /* ---- Architecture -------------------------------------------------- */
+
+  .arch { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 8px; }
+  .layer {
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 11px;
+    padding: 22px;
+    background: rgba(255,255,255,0.022);
+  }
+  .layer .path { font-family: var(--mono); font-size: 12.4px; color: var(--accent); margin-bottom: 9px; }
+  .layer h3 { font-size: 15px; margin: 0 0 8px; font-weight: 650; }
+  .layer p { margin: 0; font-size: 14.2px; color: var(--ink-400); }
+
+  /* ---- Footer -------------------------------------------------------- */
+
+  footer { padding: 54px 0 70px; }
+  .foot-row { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; }
+  .foot-links { display: flex; flex-wrap: wrap; gap: 20px; font-size: 14.4px; }
+  .foot-links a { color: var(--ink-300); text-decoration: none; }
+  .foot-links a:hover { color: #fff; text-decoration: underline; }
+  .foot-note { font-size: 13.4px; color: var(--ink-600); margin-top: 26px; max-width: 70ch; }
+
+  @media (max-width: 640px) {
+    header.hero { padding: 54px 0 44px; }
+    section { padding: 54px 0; }
+    .figure { padding: 20px 18px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .btn:hover { transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand"><span class="mark">F</span> FinStat</div>
+
+    <h1>Trial balance in. <em>Statements out.</em></h1>
+
+    <p class="lede">
+      Web based financial statement preparation. Capture a trial balance and the balance sheet,
+      profit and loss, cash flow statement and notes are derived from it, with every figure traced
+      back to one account on one chart.
+    </p>
+
+    <div class="stack">
+      <span class="chip">Next.js</span>
+      <span class="chip">React</span>
+      <span class="chip">TypeScript</span>
+      <span class="chip">NestJS</span>
+      <span class="chip">PostgreSQL</span>
+      <span class="chip">Prisma</span>
+      <span class="chip">Redis</span>
+      <span class="chip">BullMQ</span>
+      <span class="chip">ExcelJS</span>
+      <span class="chip">pdfmake</span>
+    </div>
+
+    <div class="actions">
+      <a class="btn btn-primary" href="https://github.com/abdelrahmanyahia2002/finstat">View the source</a>
+      <a class="btn btn-ghost" href="#walkthrough">Watch the walkthrough</a>
+    </div>
+
+    <figure class="loop">
+      <img src="demo.gif" alt="Pasting a block of cells from Excel into the trial balance. The app reads the headings and amounts, shows what it would change, and reports that the block balances.">
+      <figcaption>
+        Paste a block out of Excel. It reads the headings, the thousands separators and the
+        accounting brackets, tells you exactly what it would change, and writes nothing until you say so.
+      </figcaption>
+    </figure>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Why it is harder than it looks</p>
+    <h2>Accounting software is judged on whether the numbers tie</h2>
+    <p class="section-lede">
+      Anyone can render a table of figures. The work is in making the three statements agree with
+      each other, with the subledgers, and with last year, and in saying so out loud when they do not.
+    </p>
+
+    <div class="proof">
+      <div class="card">
+        <h3>The balance sheet closes by construction</h3>
+        <p>
+          The model is a pre-closing trial balance: it carries the profit and loss accounts alongside
+          retained earnings brought forward. Writing every balance debit-positive, if debits equal
+          credits then the sheet has to close.
+        </p>
+        <pre class="algebra">assets + expenses
+  − liabilities − equity − income = 0
+
+assets = liabilities + equity
+       + (income − expenses)
+
+<span class="hl">assets = liabilities + equity + profit</span></pre>
+        <p>
+          So folding the year's profit into retained earnings balances it exactly. Any imbalance a
+          user sees is real, never an artefact of the engine.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>The cash flow reconciles to the cent</h3>
+        <p>
+          Indirect method, built from the movement between two balance sheets plus the current
+          year's profit and loss. Every balance sheet section belongs to exactly one bucket, so the
+          computed movement equals the actual movement in cash exactly rather than approximately.
+        </p>
+        <p>
+          Where it does not reconcile, the difference is surfaced as a validation failure instead of
+          being plugged. A hundred randomised second years are tested for this on every run.
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>One parser for pasting and importing</h3>
+        <p>
+          An uploaded workbook is flattened to the same tab separated form the clipboard produces,
+          so importing a file and pasting a block go through one parser and can never disagree about
+          what a row means.
+        </p>
+        <p>
+          It handles what Excel actually puts on the clipboard: quoted cells containing tabs, CRLF
+          row breaks, and amounts written as <span class="tabular">1,234.56</span>,
+          <span class="tabular">1.234,56</span>, <span class="tabular">(1,234.56)</span> or
+          <span class="tabular">1234.56-</span>.
+        </p>
+      </div>
+    </div>
+
+    <div class="figures">
+      <div class="figure"><span class="n tabular">35</span><span class="l">unit tests over the engine, money arithmetic and parser</span></div>
+      <div class="figure"><span class="n tabular">300</span><span class="l">randomised property checks per run</span></div>
+      <div class="figure"><span class="n tabular">72</span><span class="l">end to end checks against the running API</span></div>
+      <div class="figure"><span class="n tabular">13</span><span class="l">financial validation rules</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="walkthrough" class="paper">
+  <div class="wrap">
+    <p class="eyebrow">Walkthrough</p>
+    <h2>Two minutes, end to end</h2>
+    <p class="section-lede">
+      Sign in, the chart of accounts, trial balance entry, the Excel paste, the debtors listing
+      reconciling to its control account, all three statements, the validation run, the notes,
+      report generation, and carrying a year forward into the next one.
+    </p>
+
+    <div class="video-frame">
+      <video controls preload="metadata" poster="screenshot-balance-sheet.png"
+             playsinline aria-label="FinStat product walkthrough">
+        <source src="demo.mp4" type="video/mp4">
+        Your browser cannot play this video.
+        <a href="demo.mp4">Download it instead</a>.
+      </video>
+    </div>
+
+    <p class="section-lede" style="margin-top:20px;margin-bottom:0">
+      The recording is scripted rather than hand captured. A script drives the real app in Chrome,
+      records it through the DevTools screencast, and encodes it with ffmpeg, so re-running it
+      produces the same walkthrough against the current build.
+    </p>
+  </div>
+</section>
+
+<section class="paper" style="padding-top:0">
+  <div class="wrap">
+    <div class="shots">
+      <figure class="shot" style="margin:0">
+        <img src="screenshot-trial-balance.png" alt="The trial balance grid, with debit and credit columns, reporting categories and running totals.">
+        <div class="cap">Trial balance entry, with live totals and last year alongside</div>
+      </figure>
+      <figure class="shot" style="margin:0">
+        <img src="screenshot-cash-flow.png" alt="The cash flow statement, showing operating, investing and financing activities reconciling to the closing cash balance.">
+        <div class="cap">Cash flow, reconciled to the movement in cash</div>
+      </figure>
+      <figure class="shot" style="margin:0">
+        <img src="screenshot-validation.png" alt="The validation screen showing zero errors, zero warnings and zero notices.">
+        <div class="cap">Validation, run before a year can be locked</div>
+      </figure>
+      <figure class="shot" style="margin:0">
+        <img src="screenshot-reports.png" alt="The reports screen listing PDF and Excel outputs with generated files ready to download.">
+        <div class="cap">Reports, built as background jobs</div>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="paper">
+  <div class="wrap">
+    <p class="eyebrow">What it does</p>
+    <h2>Everything a small practice needs to close a year</h2>
+
+    <div class="features">
+      <div class="feature">
+        <h3>Companies and financial years</h3>
+        <p>Multi-tenant, with five ranked roles per company and a year lifecycle from draft through to closed.</p>
+      </div>
+      <div class="feature">
+        <h3>Chart of accounts</h3>
+        <p>Every account maps to one statement line. A seventy account template gets a new company reporting immediately.</p>
+      </div>
+      <div class="feature">
+        <h3>Data entry that fits the work</h3>
+        <p>Type into the grid, paste from Excel, or import a workbook. Every path previews before it writes.</p>
+      </div>
+      <div class="feature">
+        <h3>Debtors and creditors</h3>
+        <p>Aged listings that have to agree to their control accounts, with the difference reported when they do not.</p>
+      </div>
+      <div class="feature">
+        <h3>Notes and disclosures</h3>
+        <p>Policies you write, plus notes generated from the figures. Editing a generated note makes it yours.</p>
+      </div>
+      <div class="feature">
+        <h3>The three statements</h3>
+        <p>Balance sheet, profit and loss, and an indirect cash flow, each with comparatives and note references.</p>
+      </div>
+      <div class="feature">
+        <h3>Carry forward</h3>
+        <p>Balance sheet accounts open where they closed. Profit and loss starts at nil. Listings and policies come across.</p>
+      </div>
+      <div class="feature">
+        <h3>Reports</h3>
+        <p>Typeset PDF packs and working Excel workbooks, queued on BullMQ so a long export never blocks a request.</p>
+      </div>
+      <div class="feature">
+        <h3>Audit trail</h3>
+        <p>Every change to a company, who made it and when, readable by anyone with reviewer access.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="paper">
+  <div class="wrap">
+    <p class="eyebrow">Validation</p>
+    <h2>The checks a reviewer would run by hand</h2>
+    <p class="section-lede">
+      They never change a number. They report what does not tie, with the amount. Errors block a
+      year from being locked; warnings do not.
+    </p>
+
+    <ul class="checks">
+      <li><span class="sev err">Error</span> Trial balance balances</li>
+      <li><span class="sev err">Error</span> Balance sheet closes</li>
+      <li><span class="sev err">Error</span> Every account is mapped to a statement line</li>
+      <li><span class="sev err">Error</span> No duplicate account codes</li>
+      <li><span class="sev err">Error</span> Debtors listing agrees to the control account</li>
+      <li><span class="sev err">Error</span> Creditors listing agrees to the control account</li>
+      <li><span class="sev err">Error</span> Opening retained earnings follow last year's closing</li>
+      <li><span class="sev err">Error</span> Cash flow reconciles to the movement in cash</li>
+      <li><span class="sev err">Error</span> Notes tie to the face of the statements</li>
+      <li><span class="sev warn">Warning</span> A statement line sitting on the unexpected side</li>
+      <li><span class="sev warn">Warning</span> Ageing buckets do not add up to the stated balance</li>
+      <li><span class="sev warn">Warning</span> Net cash is negative</li>
+      <li><span class="sev info">Notice</span> No comparative year linked</li>
+    </ul>
+
+    <p class="section-lede" style="margin-top:22px;margin-bottom:0">
+      The wrong-side check looks at section totals rather than individual accounts. Contra accounts
+      are ordinary bookkeeping: accumulated depreciation is a credit inside property, plant and
+      equipment, and dividends declared is a debit inside equity. Flagging those one by one would
+      bury the case that actually matters.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="eyebrow">Architecture</p>
+    <h2>One engine, two runtimes</h2>
+    <p class="section-lede">
+      The statement engine is a plain TypeScript package with no framework and no database. The API
+      calls it to render a PDF; the browser calls it to preview a figure the user just typed. That
+      is why a number on screen cannot drift away from the number in the report.
+    </p>
+
+    <div class="arch">
+      <div class="layer">
+        <div class="path">packages/shared</div>
+        <h3>The engine</h3>
+        <p>The reporting taxonomy, the statement builders, the validation rules, the clipboard
+        parser and cent-exact money arithmetic. Pure functions, fully unit tested.</p>
+      </div>
+      <div class="layer">
+        <div class="path">apps/api</div>
+        <h3>The service</h3>
+        <p>NestJS with Prisma over PostgreSQL, JWT auth with refresh token rotation, guards that
+        scope every request to a company and a year, and BullMQ workers on Redis for reports.</p>
+      </div>
+      <div class="layer">
+        <div class="path">apps/web</div>
+        <h3>The application</h3>
+        <p>Next.js App Router with TanStack Query and Tailwind. A spreadsheet-like grid, paste
+        handling, statement rendering and print styles.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-row">
+      <div class="brand" style="margin:0"><span class="mark">F</span> FinStat</div>
+      <nav class="foot-links">
+        <a href="https://github.com/abdelrahmanyahia2002/finstat">Source</a>
+        <a href="https://github.com/abdelrahmanyahia2002/finstat#getting-it-running">Run it locally</a>
+        <a href="demo.mp4">Walkthrough</a>
+        <a href="https://github.com/abdelrahmanyahia2002">More work</a>
+      </nav>
+    </div>
+    <p class="foot-note">
+      Built by Abdelrahman Yahia. MIT licensed. The company, the figures and the people in the
+      screenshots are seed data, not a real business.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>
